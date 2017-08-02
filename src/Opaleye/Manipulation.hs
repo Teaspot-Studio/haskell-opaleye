@@ -1,4 +1,6 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 -- | Inserts, updates and deletes
 --
@@ -39,8 +41,12 @@ import qualified Opaleye.Internal.HaskellDB.Sql.Print as HPrint
 import qualified Opaleye.Internal.HaskellDB.Sql.Default as SD
 import qualified Opaleye.Internal.HaskellDB.Sql.Generate as SG
 
+import qualified Control.Applicative as A
+
 import qualified Database.PostgreSQL.Simple as PGS
 
+import           Data.Profunctor                 (Profunctor, dimap)
+import qualified Data.Profunctor.Product         as PP
 import qualified Data.Profunctor.Product.Default as D
 
 import           Data.Int (Int64)
@@ -101,6 +107,46 @@ runUpdate :: PGS.Connection
           -- ^ The number of rows updated
 runUpdate conn = PGS.execute_ conn . fromString .:. arrangeUpdateSql
 
+newtype Updater a b = Updater (a -> b)
+
+-- { Boilerplate instances
+
+instance Functor (Updater a) where
+  fmap f (Updater g) = Updater (fmap f g)
+
+instance A.Applicative (Updater a) where
+  pure = Updater . A.pure
+  Updater f <*> Updater x = Updater (f A.<*> x)
+
+instance Profunctor Updater where
+  dimap f g (Updater h) = Updater (dimap f g h)
+
+instance PP.ProductProfunctor Updater where
+  empty  = PP.defaultEmpty
+  (***!) = PP.defaultProfunctorProduct
+
+--
+
+instance D.Default Updater (Column a) (Column a) where
+  def = Updater id
+
+instance D.Default Updater (Column a) (Maybe (Column a)) where
+  def = Updater Just
+
+runUpdateEasy :: D.Default Updater columnsR columnsW
+              => PGS.Connection
+              -> T.Table columnsW columnsR
+              -- ^ Table to update
+              -> (columnsR -> columnsR)
+              -- ^ Update function to apply to chosen rows
+              -> (columnsR -> Column PGBool)
+              -- ^ Predicate function @f@ to choose which rows to update.
+              -- 'runUpdate' will update rows for which @f@ returns @TRUE@
+              -- and leave unchanged rows for which @f@ returns @FALSE@.
+              -> IO Int64
+              -- ^ The number of rows updated
+runUpdateEasy conn table u = runUpdate conn table (u' . u)
+  where Updater u' = D.def
 
 -- | Update rows in a table and return a function of the updated rows
 --

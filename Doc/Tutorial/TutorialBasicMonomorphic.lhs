@@ -1,14 +1,14 @@
 > {-# LANGUAGE FlexibleContexts #-}
 > {-# LANGUAGE FlexibleInstances #-}
 > {-# LANGUAGE MultiParamTypeClasses #-}
-> {-# LANGUAGE UndecidableInstances #-}
 >
 > module TutorialBasicMonomorphic where
 >
 > import           Prelude hiding (sum)
 >
 > import           Opaleye (Column, Nullable,
->                          Table(Table), required, queryTable,
+>                          Table, table, queryTable,
+>                          tableColumn,
 >                          Query, (.==),
 >                          aggregate, groupBy,
 >                          count, avg, sum, leftJoin, runQuery,
@@ -17,14 +17,13 @@
 >
 > import qualified Opaleye                 as O
 >
-> import           Control.Applicative     ((<$>), (<*>))
+> import           Control.Applicative     (Applicative, (<$>), (<*>))
 >
 > import qualified Data.Profunctor         as P
 > import           Data.Profunctor.Product (p3)
 > import           Data.Profunctor.Product.Default (Default)
 > import qualified Data.Profunctor.Product.Default as D
 > import           Data.Time.Calendar (Day)
-> import qualified Opaleye.Internal.TableMaker
 > import qualified Opaleye.Internal.Join
 >
 > import qualified Database.PostgreSQL.Simple as PGS
@@ -64,13 +63,19 @@ manipulation tutorial you can see an example of when they might differ.
 
 > personTable :: Table (Column PGText, Column PGInt4, Column PGText)
 >                      (Column PGText, Column PGInt4, Column PGText)
-> personTable = Table "personTable" (p3 ( required "name"
->                                       , required "age"
->                                       , required "address" ))
+> personTable = table "personTable" (p3 ( tableColumn "name"
+>                                       , tableColumn "age"
+>                                       , tableColumn "address" ))
+
+> personTable' :: Table (Column PGText, Column PGInt4, Column PGText)
+>                       (Column PGText, Column PGInt4, Column PGText)
+> personTable' = table "personTable" (p3 ( tableColumn "name"
+>                                        , tableColumn "age"
+>                                        , tableColumn "address" ))
 
 By default, the table `"personTable"` is looked up in PostgreSQL's
 default `"public"` schema. If we wanted to specify a different schema we
-could have used the `TableWithSchema` constructor instead of `Table`.
+could have used the `tableWithSchema` constructor instead of `table`.
 
 To query a table we use `queryTable`.
 
@@ -132,21 +137,29 @@ them.
 >
 > data Birthday = Birthday { bdName :: String, bdDay :: Day }
 >
-> instance Default Unpackspec BirthdayColumn BirthdayColumn where
->   def = BirthdayColumn <$> P.lmap bdNameColumn D.def
->                        <*> P.lmap bdDayColumn  D.def
+> birthdayColumnDef ::
+>   (Applicative (p BirthdayColumn),
+>    P.Profunctor p,
+>    Default p (Column PGText) (Column PGText),
+>    Default p (Column PGDate) (Column PGDate)) =>
+>   p BirthdayColumn BirthdayColumn
+> birthdayColumnDef = BirthdayColumn <$> P.lmap bdNameColumn D.def
+>                                    <*> P.lmap bdDayColumn  D.def
 >
-> instance Default Opaleye.Internal.TableMaker.ColumnMaker BirthdayColumn BirthdayColumn where
->   def = BirthdayColumn <$> P.lmap bdNameColumn D.def
->                        <*> P.lmap bdDayColumn  D.def
+> instance Default Unpackspec BirthdayColumn BirthdayColumn where
+>   def = birthdayColumnDef
 
-Then we can use 'Table' to make a table on our record type in exactly
+Naturally this is all derivable using `Generic` or Template Haskell,
+but no one's bothered to implement that yet.  Would you like to?
+
+Then we can use 'table' to make a table on our record type in exactly
 the same way as before.
 
 > birthdayTable :: Table BirthdayColumn BirthdayColumn
-> birthdayTable = Table "birthdayTable"
->                        (BirthdayColumn <$> P.lmap bdNameColumn (required "name")
->                                        <*> P.lmap bdDayColumn  (required "birthday"))
+> birthdayTable =
+>   table "birthdayTable"
+>   (BirthdayColumn <$> P.lmap bdNameColumn (tableColumn "name")
+>                   <*> P.lmap bdDayColumn  (tableColumn "birthday"))
 >
 > birthdayQuery :: Query BirthdayColumn
 > birthdayQuery = queryTable birthdayTable
@@ -186,7 +199,7 @@ this information with the following datatype.
 >                                  , radius   :: Column PGFloat8
 >                                  }
 >
-> instance Default Opaleye.Internal.TableMaker.ColumnMaker WidgetColumn WidgetColumn where
+> instance Default Unpackspec WidgetColumn WidgetColumn where
 >   def = WidgetColumn <$> P.lmap style    D.def
 >                      <*> P.lmap color    D.def
 >                      <*> P.lmap location D.def
@@ -197,12 +210,12 @@ For the purposes of this example the style, color and location will be
 strings, but in practice they might have been a different data type.
 
 > widgetTable :: Table WidgetColumn WidgetColumn
-> widgetTable = Table "widgetTable"
->                      (WidgetColumn <$> P.lmap style    (required "style")
->                                    <*> P.lmap color    (required "color")
->                                    <*> P.lmap location (required "location")
->                                    <*> P.lmap quantity (required "quantity")
->                                    <*> P.lmap radius   (required "radius"))
+> widgetTable = table "widgetTable"
+>                      (WidgetColumn <$> P.lmap style    (tableColumn "style")
+>                                    <*> P.lmap color    (tableColumn "color")
+>                                    <*> P.lmap location (tableColumn "location")
+>                                    <*> P.lmap quantity (tableColumn "quantity")
+>                                    <*> P.lmap radius   (tableColumn "radius"))
 
 
 Say we want to group by the style and color of widgets, calculating
@@ -284,13 +297,17 @@ purpose, which is just a notational convenience.
 >   def = BirthdayColumnNullable <$> P.lmap bdNameColumn D.def
 >                                <*> P.lmap bdDayColumn  D.def
 
+Again, this is all derivable using `Generic` or Template Haskell, if
+someone would take the time to implement it.
+
 A left join is expressed by specifying the two tables to join and the
 join condition.
 
 > personBirthdayLeftJoin :: Query ((Column PGText, Column PGInt4, Column PGText),
 >                                  BirthdayColumnNullable)
 > personBirthdayLeftJoin = leftJoin personQuery birthdayQuery eqName
->     where eqName ((name, _, _), birthdayRow) = name .== bdNameColumn birthdayRow
+>     where eqName ((name, _, _), birthdayRow) =
+>             name .== bdNameColumn birthdayRow
 
 The generated SQL is
 
@@ -373,6 +390,9 @@ minimize the number of confusing error messages!
 >                  -> Query BirthdayColumn
 >                  -> IO [Birthday]
 > runBirthdayQuery = runQuery
+
+Again, this is derivable using `Generic` or Template Haskell, if
+someone would take the time to implement it.
 
 Conclusion
 ==========

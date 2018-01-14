@@ -37,15 +37,15 @@ restrict :: QueryArr (Column T.PGBool) ()
 restrict = QueryArr f where
   f (Column predicate, primQ, t0) = ((), PQ.restrict predicate primQ, t0)
 
-{-| Add a @WHERE EXSITS@ clause to the current query. -}
-exists :: QueryArr a b -> QueryArr a ()
-exists criteria = QueryArr f where
+{-| Add a @WHERE EXISTS@ clause to the current query. -}
+restrictExists :: QueryArr a b -> QueryArr a ()
+restrictExists criteria = QueryArr f where
   f (a, primQ, t0) = ((), PQ.exists primQ existsQ, t1) where
     (_, existsQ, t1) = runSimpleQueryArr criteria (a, t0)
 
-{-| Add a @WHERE EXSITS@ clause to the current query. -}
-notExists :: QueryArr a b -> QueryArr a ()
-notExists criteria = QueryArr f where
+{-| Add a @WHERE NOT EXISTS@ clause to the current query. -}
+restrictNotExists :: QueryArr a b -> QueryArr a ()
+restrictNotExists criteria = QueryArr f where
   f (a, primQ, t0) = ((), PQ.notExists primQ existsQ, t1) where
     (_, existsQ, t1) = runSimpleQueryArr criteria (a, t0)
 
@@ -317,8 +317,9 @@ timestamptzAtTimeZone :: Column T.PGTimestamptz
                       -> Column T.PGTimestamp
 timestamptzAtTimeZone = C.binOp HPQ.OpAtTimeZone
 
--- | Do not use.  Will be deprecated in version 0.6.  Use
--- 'C.unsafeCast' instead.
+{-# DEPRECATED doubleOfInt
+    "Use 'C.unsafeCast' instead. \
+    \Will be removed in version 0.7." #-}
 doubleOfInt :: Column T.PGInt4 -> Column T.PGFloat8
 doubleOfInt (Column e) = Column (HPQ.CastExpr "float8" e)
 
@@ -344,3 +345,13 @@ infix 4 .&>
 infix 4 .-|-
 (.-|-) :: Column (T.PGRange a) -> Column (T.PGRange a) -> Column T.PGBool
 (.-|-) = C.binOp (HPQ.:-|-)
+
+-- * Deprecated
+
+-- | Identical to 'restrictExists'.  Will be deprecated in version 0.7.
+exists :: QueryArr a b -> QueryArr a ()
+exists = restrictExists
+
+-- | Identical to 'restrictNoExists'.  Will be deprecated in version 0.7.
+notExists :: QueryArr a b -> QueryArr a ()
+notExists = restrictNotExists

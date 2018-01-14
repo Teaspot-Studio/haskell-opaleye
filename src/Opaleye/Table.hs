@@ -1,4 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FunctionalDependencies #-}
+
 
 {- |
 
@@ -9,7 +12,7 @@
  'required' and gives rise to a
 
  @
- TableProperties (Column PGInt4) (Column PGInt4)
+ TableColumns (Column PGInt4) (Column PGInt4)
  @
 
  The leftmost argument is the type of writes. When you insert or
@@ -20,7 +23,7 @@
  to a
 
  @
- TableProperties (Column (Nullable PGInt4)) (Column (Nullable PGInt4))
+ TableColumns (Column (Nullable PGInt4)) (Column (Nullable PGInt4))
  @
 
  When you insert or update into this column you must give it a @Column
@@ -28,25 +31,29 @@
  @toNullable :: Column a -> Column (Nullable a)@, or with @null ::
  Column (Nullable a)@.
 
- An optional non-nullable @PGInt4@ is created with optional and gives
+ An optional non-nullable @PGInt4@ is created with 'optional' and gives
  rise to a
 
  @
- TableProperties (Maybe (Column PGInt4)) (Column PGInt4)
+ TableColumns (Maybe (Column PGInt4)) (Column PGInt4)
  @
 
+ Optional columns are those that can be omitted on writes, such as
+ those that have @DEFAULT@s or those that are @SERIAL@.
  When you insert or update into this column you must give it a @Maybe
  (Column PGInt4)@. If you provide @Nothing@ then the column will be
  omitted from the query and the default value will be used. Otherwise
  you have to provide a @Just@ containing a @Column PGInt4@.
 
- An optional non-nullable @PGInt4@ is created with optional and gives
+ An optional nullable @PGInt4@ is created with 'optional' and gives
  rise to a
 
  @
- TableProperties (Maybe (Column (Nullable PGInt4))) (Column PGInt4)
+ TableColumns (Maybe (Column (Nullable PGInt4))) (Column (Nullable PGInt4))
  @
 
+ Optional columns are those that can be omitted on writes, such as
+ those that have @DEFAULT@s or those that are @SERIAL@.
  When you insert or update into this column you must give it a @Maybe
  (Column (Nullable PGInt4))@. If you provide @Nothing@ then the default
  value will be used. Otherwise you have to provide a @Just@ containing
@@ -54,59 +61,72 @@
 
 -}
 
-module Opaleye.Table (module Opaleye.Table,
+module Opaleye.Table (-- * Creating tables
+                      table,
+                      tableWithSchema,
+                      T.Table,
+                      T.tableColumn,
+                      T.optional,
+                      T.required,
+                      -- * Querying tables
+                      queryTable,
                       -- * Other
+                      TableColumns,
+                      -- * Deprecated
                       View,
                       Writer,
                       T.Table(T.Table, T.TableWithSchema),
-                      TableProperties) where
+                      -- * Module reexport
+                      module Opaleye.Table) where
 
-import           Opaleye.Internal.Column (Column(Column))
 import qualified Opaleye.Internal.QueryArr as Q
 import qualified Opaleye.Internal.Table as T
-import           Opaleye.Internal.Table (View(View), Table, Writer,
-                                         TableProperties)
-import qualified Opaleye.Internal.TableMaker as TM
+import           Opaleye.Internal.Table (View, Table, Writer,
+                                         TableColumns)
+
 import qualified Opaleye.Internal.Tag as Tag
+import qualified Opaleye.Internal.Unpackspec as U
 
 import qualified Data.Profunctor.Product.Default as D
-
-import qualified Opaleye.Internal.HaskellDB.PrimQuery as HPQ
 
 -- | Example type specialization:
 --
 -- @
--- queryTable :: Table w (Column a, Column b) -> Query (Column a, Column b)
+-- queryTable :: Table w (Column a, Column b)
+--            -> Query (Column a, Column b)
 -- @
 --
 -- Assuming the @makeAdaptorAndInstance@ splice has been run for the
 -- product type @Foo@:
 --
 -- @
--- queryTable :: Table w (Foo (Column a) (Column b) (Column c)) -> Query (Foo (Column a) (Column b) (Column c))
+-- queryTable :: Table w (Foo (Column a) (Column b) (Column c))
+--            -> Query (Foo (Column a) (Column b) (Column c))
 -- @
-queryTable :: D.Default TM.ColumnMaker columns columns =>
+queryTable :: D.Default U.Unpackspec columns columns =>
               Table a columns -> Q.Query columns
 queryTable = queryTableExplicit D.def
 
--- | 'required' is for columns which are not 'optional'.  You must
--- provide them on writes.
-required :: String -> TableProperties (Column a) (Column a)
-required columnName = T.TableProperties
-  (T.required columnName)
-  (View (Column (HPQ.BaseTableAttrExpr columnName)))
+-- | Create a table with unqualified names.
+table :: String
+      -- ^ Table name
+      -> TableColumns writeColumns viewColumns
+      -> Table writeColumns viewColumns
+table = T.Table
 
--- | 'optional' is for columns that you can omit on writes, such as
---  columns which have defaults or which are SERIAL.
-optional :: String -> TableProperties (Maybe (Column a)) (Column a)
-optional columnName = T.TableProperties
-  (T.optional columnName)
-  (View (Column (HPQ.BaseTableAttrExpr columnName)))
+-- | Create a table.
+tableWithSchema :: String
+                -- ^ Schema name
+                -> String
+                -- ^ Table name
+                -> TableColumns writeColumns viewColumns
+                -> Table writeColumns viewColumns
+tableWithSchema = T.TableWithSchema
 
 -- * Explicit versions
 
-queryTableExplicit :: TM.ColumnMaker tablecolumns columns ->
+queryTableExplicit :: U.Unpackspec tablecolumns columns ->
                      Table a tablecolumns -> Q.Query columns
-queryTableExplicit cm table = Q.simpleQueryArr f where
+queryTableExplicit cm table' = Q.simpleQueryArr f where
   f ((), t0) = (retwires, primQ, Tag.next t0) where
-    (retwires, primQ) = T.queryTable cm table t0
+    (retwires, primQ) = T.queryTable cm table' t0

@@ -2,8 +2,8 @@
 >
 > import           Prelude hiding (sum)
 >
-> import           Opaleye (Column, Table(Table),
->                           required, optional, (.==), (.<),
+> import           Opaleye (Column, Table, table,
+>                           tableColumn, (.==), (.<),
 >                           arrangeDeleteSql, arrangeInsertManySql,
 >                           arrangeUpdateSql, arrangeInsertManyReturningSql,
 >                           PGInt4, PGFloat8)
@@ -25,25 +25,25 @@ our manipulation on.  It will have three columns: an integer-valued
 "id" column (assumed to be an auto-incrementing field) and two
 double-valued required fields.  The `Table` type constructor has two
 type arguments.  The first one is the type of writes to the table, and
-the second is the type of reads from the table.  Notice that the "id"
-column was defined as optional (for writes) so in the type of writes
-it is wrapped in a Maybe.  That means we don't necessarily need to
+the second is the type of reads from the table.  The "id"
+column is defined as optional (for writes) because its write type is
+`Maybe (Column PGInt4)`.  That means we don't necessarily need to
 specify it when writing to the table.  The database will automatically
 fill in a value for us.
 
-> table :: Table
+> myTable :: Table
 >     (Maybe (Column PGInt4), Column PGFloat8, Column PGFloat8, Column P.PGText)
 >     (Column PGInt4, Column PGFloat8, Column PGFloat8, Column P.PGText)
-> table = Table "tablename" (p4 ( optional "id"
->                               , required "x"
->                               , required "y"
->                               , required "s" ))
+> myTable = table "tablename" (p4 ( tableColumn "id"
+>                                 , tableColumn "x"
+>                                 , tableColumn "y"
+>                                 , tableColumn "s" ))
 
 To perform a delete we provide an expression from our read type to
 `Column Bool`.  All rows for which the expression is true are deleted.
 
 > delete :: String
-> delete = arrangeDeleteSql table (\(_, x, y, _) -> x .< y)
+> delete = arrangeDeleteSql myTable (\(_, x, y, _) -> x .< y)
 
 ghci> putStrLn delete
 DELETE FROM tablename
@@ -58,7 +58,7 @@ Values of other types should be created using the functions in the
 P.PGText` from a `String`.
 
 > insertNothing :: String
-> insertNothing = arrangeInsertManySql table (return (Nothing, 2, 3, P.pgString "Hello"))
+> insertNothing = arrangeInsertManySql myTable (return (Nothing, 2, 3, P.pgString "Hello"))
 
 ghci> putStrLn insertNothing
 INSERT INTO "tablename" ("id",
@@ -76,7 +76,7 @@ rely on the Num instance and must use constant:
 
 > insertNonLiteral :: Double -> String
 > insertNonLiteral i =
->   arrangeInsertManySql table (return (Nothing, 2, C.constant i, P.pgString "Hello"))
+>   arrangeInsertManySql myTable (return (Nothing, 2, C.constant i, P.pgString "Hello"))
 
 ghci> putStrLn $ insertNonLiteral 12.0
 INSERT INTO "tablename" ("id",
@@ -92,7 +92,7 @@ VALUES (DEFAULT,
 If we really want to specify an optional column we can use `Just`.
 
 > insertJust :: String
-> insertJust = arrangeInsertManySql table (return (Just 1, 2, 3, P.pgString "Hello"))
+> insertJust = arrangeInsertManySql myTable (return (Just 1, 2, 3, P.pgString "Hello"))
 
 ghci> putStrLn insertJust
 INSERT INTO "tablename" ("id",
@@ -111,8 +111,8 @@ type, and a condition given by a function from the read type to
 according to the update function.
 
 > update :: String
-> update = arrangeUpdateSql table (\(_, x, y, s) -> (Nothing, x + y, x - y, s))
->                                 (\(id_, _, _, _) -> id_ .== 5)
+> update = arrangeUpdateSql myTable (\(_, x, y, s) -> (Nothing, x + y, x - y, s))
+>                                   (\(id_, _, _, _) -> id_ .== 5)
 
 ghci> putStrLn update
 SET "id" = DEFAULT,
@@ -129,8 +129,8 @@ Opaleye supports it also.
 
 > insertReturning :: String
 > insertReturning =
->   arrangeInsertManyReturningSql def' table (return (Nothing, 4, 5, P.pgString "Bye"))
->                                            (\(id_, _, _, _) -> id_)
+>   arrangeInsertManyReturningSql def' myTable (return (Nothing, 4, 5, P.pgString "Bye"))
+>                                              (\(id_, _, _, _) -> id_)
 >   -- TODO: vv This is too messy
 >   where def' :: U.Unpackspec (Column a) (Column a)
 >         def' = def

@@ -12,12 +12,11 @@
 > import           Prelude hiding (sum)
 >
 > import           Opaleye (Column, Nullable,
->                          Table(Table), required, queryTable,
+>                          Table, table, tableColumn, queryTable,
 >                          Query, (.==), aggregate, groupBy,
 >                          count, avg, sum, leftJoin, runQuery,
 >                          showSqlForPostgres, Unpackspec,
 >                          PGInt4, PGInt8, PGText, PGDate, PGFloat8)
-> import qualified Opaleye as O
 >
 > import           Control.Applicative     ((<$>), (<*>), Applicative)
 >
@@ -64,13 +63,13 @@ manipulation tutorial you can see an example of when they might differ.
 
 > personTable :: Table (Column PGText, Column PGInt4, Column PGText)
 >                      (Column PGText, Column PGInt4, Column PGText)
-> personTable = Table "personTable" (p3 ( required "name"
->                                       , required "age"
->                                       , required "address" ))
+> personTable = table "personTable" (p3 ( tableColumn "name"
+>                                       , tableColumn "age"
+>                                       , tableColumn "address" ))
 
 By default, the table `"personTable"` is looked up in PostgreSQL's
 default `"public"` schema. If we wanted to specify a different schema we
-could have used the `TableWithSchema` constructor instead of `Table`.
+could have used the `tableWithSchema` constructor instead of `table`.
 
 To query a table we use `queryTable`.
 
@@ -156,20 +155,6 @@ compatible with Opaleye!
 > -- could even have a symbol field containing the table name and use
 > -- https://hackage.haskell.org/package/base-4.8.2.0/docs/GHC-TypeLits.html#v:symbolVal
 > 
->
-> -- { If you use Tableable you don't even have to specify required or optional
->      
-> class Tableable a b | a -> b where
->   tableField :: String -> O.TableProperties a b
->
-> instance Tableable (Column a) (Column a) where
->   tableField = required
->
-> instance Tableable (Maybe (Column a)) (Column a) where
->   tableField = O.optional
->
-> -- }
->
 > data Birthday f = Birthday { bdName :: TableField f String PGText NN Req
 >                            , bdDay  :: TableField f Day    PGDate NN Req
 >                            }
@@ -182,13 +167,13 @@ compatible with Opaleye!
 >   def = Birthday <$> P.lmap bdName D.def
 >                  <*> P.lmap bdDay  D.def
 
-Then we can use 'Table' to make a table on our record type in exactly
+Then we can use 'table' to make a table on our record type in exactly
 the same way as before.
 
 > birthdayTable :: Table (Birthday W) (Birthday O)
-> birthdayTable = Table "birthdayTable"
->                        (Birthday <$> P.lmap bdName (required "name")
->                                  <*> P.lmap bdDay  (required "birthday"))
+> birthdayTable = table "birthdayTable"
+>                        (Birthday <$> P.lmap bdName (tableColumn "name")
+>                                  <*> P.lmap bdDay  (tableColumn "birthday"))
 >
 > birthdayQuery :: Query (Birthday O)
 > birthdayQuery = queryTable birthdayTable
@@ -245,12 +230,12 @@ For the purposes of this example the style, color and location will be
 strings, but in practice they might have been a different data type.
 
 > widgetTable :: Table (Widget O) (Widget O)
-> widgetTable = Table "widgetTable"
->                      (Widget <$> P.lmap style    (required "style")
->                              <*> P.lmap color    (required "color")
->                              <*> P.lmap location (required "location")
->                              <*> P.lmap quantity (required "quantity")
->                              <*> P.lmap radius   (required "radius"))
+> widgetTable = table "widgetTable"
+>                      (Widget <$> P.lmap style    (tableColumn "style")
+>                              <*> P.lmap color    (tableColumn "color")
+>                              <*> P.lmap location (tableColumn "location")
+>                              <*> P.lmap quantity (tableColumn "quantity")
+>                              <*> P.lmap radius   (tableColumn "radius"))
 
 
 Say we want to group by the style and color of widgets, calculating

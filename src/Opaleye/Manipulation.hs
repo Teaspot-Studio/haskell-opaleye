@@ -32,6 +32,7 @@ import qualified Opaleye.Table as T
 import qualified Opaleye.Internal.Table as TI
 import           Opaleye.Internal.Column (Column(Column))
 import           Opaleye.Internal.Helpers ((.:), (.:.), (.::), (.::.))
+import           Opaleye.Internal.Manipulation (Updater(Updater))
 import qualified Opaleye.Internal.PrimQuery as PQ
 import qualified Opaleye.Internal.Unpackspec as U
 import           Opaleye.PGTypes (PGBool)
@@ -41,12 +42,7 @@ import qualified Opaleye.Internal.HaskellDB.Sql.Print as HPrint
 import qualified Opaleye.Internal.HaskellDB.Sql.Default as SD
 import qualified Opaleye.Internal.HaskellDB.Sql.Generate as SG
 
-import qualified Control.Applicative as A
-
 import qualified Database.PostgreSQL.Simple as PGS
-
-import           Data.Profunctor                 (Profunctor, dimap)
-import qualified Data.Profunctor.Product         as PP
 import qualified Data.Profunctor.Product.Default as D
 
 import           Data.Int (Int64)
@@ -90,6 +86,28 @@ runInsertManyReturning = runInsertManyReturningExplicit D.def
 
 -- | Update rows in a table.
 --
+-- (N.B. 'runUpdateEasy''s \"returning\" counterpart
+-- \"@runUpdateEasyReturning@\" hasn't been implemented.  File an
+-- issue if you want it!)
+runUpdateEasy :: D.Default Updater columnsR columnsW
+              => PGS.Connection
+              -> T.Table columnsW columnsR
+              -- ^ Table to update
+              -> (columnsR -> columnsR)
+              -- ^ Update function to apply to chosen rows
+              -> (columnsR -> Column PGBool)
+              -- ^ Predicate function @f@ to choose which rows to update.
+              -- 'runUpdate' will update rows for which @f@ returns @TRUE@
+              -- and leave unchanged rows for which @f@ returns @FALSE@.
+              -> IO Int64
+              -- ^ The number of rows updated
+runUpdateEasy conn table u = runUpdate conn table (u' . u)
+  where Updater u' = D.def
+
+-- | Update rows in a table.  You'll probably find it more convenient
+-- to use 'runUpdateEasy' (although 'runUpdate' provides more
+-- fine-grained control if you need it).
+--
 -- Be careful: providing 'Nothing' to a column created by @optional@
 -- updates the column to its default value.  Many users have been
 -- confused by this because they assume it means that the column is to
@@ -106,47 +124,6 @@ runUpdate :: PGS.Connection
           -> IO Int64
           -- ^ The number of rows updated
 runUpdate conn = PGS.execute_ conn . fromString .:. arrangeUpdateSql
-
-newtype Updater a b = Updater (a -> b)
-
--- { Boilerplate instances
-
-instance Functor (Updater a) where
-  fmap f (Updater g) = Updater (fmap f g)
-
-instance A.Applicative (Updater a) where
-  pure = Updater . A.pure
-  Updater f <*> Updater x = Updater (f A.<*> x)
-
-instance Profunctor Updater where
-  dimap f g (Updater h) = Updater (dimap f g h)
-
-instance PP.ProductProfunctor Updater where
-  empty  = PP.defaultEmpty
-  (***!) = PP.defaultProfunctorProduct
-
---
-
-instance D.Default Updater (Column a) (Column a) where
-  def = Updater id
-
-instance D.Default Updater (Column a) (Maybe (Column a)) where
-  def = Updater Just
-
-runUpdateEasy :: D.Default Updater columnsR columnsW
-              => PGS.Connection
-              -> T.Table columnsW columnsR
-              -- ^ Table to update
-              -> (columnsR -> columnsR)
-              -- ^ Update function to apply to chosen rows
-              -> (columnsR -> Column PGBool)
-              -- ^ Predicate function @f@ to choose which rows to update.
-              -- 'runUpdate' will update rows for which @f@ returns @TRUE@
-              -- and leave unchanged rows for which @f@ returns @FALSE@.
-              -> IO Int64
-              -- ^ The number of rows updated
-runUpdateEasy conn table u = runUpdate conn table (u' . u)
-  where Updater u' = D.def
 
 -- | Update rows in a table and return a function of the updated rows
 --
@@ -223,7 +200,7 @@ runInsertManyReturningExplicit qr conn t columns r =
                         (arrangeInsertManyReturningSql u t columns' r))
   where IRQ.QueryRunner u _ _ = qr
         parser = IRQ.prepareRowParser qr (r v)
-        TI.Table _ (TI.TableProperties _ (TI.View v)) = t
+        TI.View v = TI.tableColumnsView (TI.tableColumns t)
         -- This method of getting hold of the return type feels a bit
         -- suspect.  I haven't checked it for validity.
 
@@ -243,14 +220,15 @@ runUpdateReturningExplicit qr conn t update cond r =
                  (fromString (arrangeUpdateReturningSql u t update cond r))
   where IRQ.QueryRunner u _ _ = qr
         parser = IRQ.prepareRowParser qr (r v)
-        TI.Table _ (TI.TableProperties _ (TI.View v)) = t
+        TI.View v = TI.tableColumnsView (TI.tableColumns t)
 
 -- * Deprecated versions
 
 -- | Returns the number of rows inserted
---
--- This will be deprecated in version 0.6.  Use 'runInsertMany'
--- instead.
+
+{-# DEPRECATED runInsert
+    "'runInsert' will be removed in version 0.7. \
+    \Use 'runInsertMany' instead." #-}
 runInsert :: PGS.Connection -> T.Table columns columns' -> columns -> IO Int64
 runInsert conn = PGS.execute_ conn . fromString .: arrangeInsertSql
 
@@ -258,9 +236,10 @@ runInsert conn = PGS.execute_ conn . fromString .: arrangeInsertSql
 -- compiler will have trouble inferring types.  It is strongly
 -- recommended that you provide full type signatures when using
 -- @runInsertReturning@.
---
--- This will be deprecated in version 0.6.  Use
--- 'runInsertManyReturning' instead.
+
+{-# DEPRECATED runInsertReturning
+    "'runInsertReturning' will be removed in version 0.7. \
+    \Use 'runInsertManyReturning' instead." #-}
 runInsertReturning :: (D.Default RQ.QueryRunner columnsReturned haskells)
                    => PGS.Connection
                    -> T.Table columnsW columnsR
@@ -269,33 +248,38 @@ runInsertReturning :: (D.Default RQ.QueryRunner columnsReturned haskells)
                    -> IO [haskells]
 runInsertReturning = runInsertReturningExplicit D.def
 
--- | For internal use only.  Do not use.  Will be deprecated in
--- version 0.6.
+{-# DEPRECATED arrangeInsert
+    "You probably want 'runInsertMany' instead. \
+    \Will be removed in version 0.7." #-}
 arrangeInsert :: T.Table columns a -> columns -> HSql.SqlInsert
 arrangeInsert t c = arrangeInsertMany t (return c)
 
--- | For internal use only.  Do not use.  Will be deprecated in
--- version 0.6.
+{-# DEPRECATED arrangeInsertSql
+    "You probably want 'runInsertMany' instead. \
+    \Will be removed in version 0.7." #-}
 arrangeInsertSql :: T.Table columns a -> columns -> String
 arrangeInsertSql = show . HPrint.ppInsert .: arrangeInsert
 
--- | For internal use only.  Do not use.  Will be deprecated in
--- version 0.6.
+{-# DEPRECATED arrangeInsertMany
+    "You probably want 'runInsertMany' instead. \
+    \Will be removed in version 0.7." #-}
 arrangeInsertMany :: T.Table columns a -> NEL.NonEmpty columns -> HSql.SqlInsert
 arrangeInsertMany table columns = insert
-  where writer = TI.tablePropertiesWriter (TI.tableProperties table)
+  where writer = TI.tableColumnsWriter (TI.tableColumns table)
         (columnExprs, columnNames) = TI.runWriter' writer columns
         insert = SG.sqlInsert SD.defaultSqlGenerator
                       (PQ.tiToSqlTable (TI.tableIdentifier table))
                       columnNames columnExprs
 
--- | For internal use only.  Do not use.  Will be deprecated in
--- version 0.6.
+{-# DEPRECATED arrangeInsertManySql
+    "You probably want 'runInsertMany' instead. \
+    \Will be removed in version 0.7." #-}
 arrangeInsertManySql :: T.Table columns a -> NEL.NonEmpty columns -> String
 arrangeInsertManySql = show . HPrint.ppInsert .: arrangeInsertMany
 
--- | For internal use only.  Do not use.  Will be deprecated in
--- version 0.6.
+{-# DEPRECATED arrangeUpdate
+    "You probably want 'runUpdate' instead. \
+    \Will be removed in version 0.7." #-}
 arrangeUpdate :: T.Table columnsW columnsR
               -> (columnsR -> columnsW) -> (columnsR -> Column PGBool)
               -> HSql.SqlUpdate
@@ -303,32 +287,36 @@ arrangeUpdate table update cond =
   SG.sqlUpdate SD.defaultSqlGenerator
                (PQ.tiToSqlTable (TI.tableIdentifier table))
                [condExpr] (update' tableCols)
-  where TI.TableProperties writer (TI.View tableCols) = TI.tableProperties table
+  where TI.TableProperties writer (TI.View tableCols) = TI.tableColumns table
         update' = map (\(x, y) -> (y, x)) . TI.runWriter writer . update
         Column condExpr = cond tableCols
 
--- | For internal use only.  Do not use.  Will be deprecated in
--- version 0.6.
+{-# DEPRECATED arrangeUpdateSql
+    "You probably want 'runUpdate' instead. \
+    \Will be removed in version 0.7." #-}
 arrangeUpdateSql :: T.Table columnsW columnsR
               -> (columnsR -> columnsW) -> (columnsR -> Column PGBool)
               -> String
 arrangeUpdateSql = show . HPrint.ppUpdate .:. arrangeUpdate
 
--- | For internal use only.  Do not use.  Will be deprecated in
--- version 0.6.
+{-# DEPRECATED arrangeDelete
+    "You probably want 'runDelete' instead. \
+    \Will be removed in version 0.7." #-}
 arrangeDelete :: T.Table a columnsR -> (columnsR -> Column PGBool) -> HSql.SqlDelete
 arrangeDelete table cond =
   SG.sqlDelete SD.defaultSqlGenerator (PQ.tiToSqlTable (TI.tableIdentifier table)) [condExpr]
   where Column condExpr = cond tableCols
-        TI.View tableCols = TI.tablePropertiesView (TI.tableProperties table)
+        TI.View tableCols = TI.tableColumnsView (TI.tableColumns table)
 
--- | For internal use only.  Do not use.  Will be deprecated in
--- version 0.6.
+{-# DEPRECATED arrangeDeleteSql
+    "You probably want 'runDelete' instead. \
+    \Will be removed in version 0.7." #-}
 arrangeDeleteSql :: T.Table a columnsR -> (columnsR -> Column PGBool) -> String
 arrangeDeleteSql = show . HPrint.ppDelete .: arrangeDelete
 
--- | For internal use only.  Do not use.  Will be deprecated in
--- version 0.6.
+{-# DEPRECATED arrangeInsertManyReturning
+    "You probably want 'runInsertMany' instead. \
+    \Will be removed in version 0.7." #-}
 arrangeInsertManyReturning :: U.Unpackspec columnsReturned ignored
                            -> T.Table columnsW columnsR
                            -> NEL.NonEmpty columnsW
@@ -337,12 +325,13 @@ arrangeInsertManyReturning :: U.Unpackspec columnsReturned ignored
 arrangeInsertManyReturning unpackspec table columns returningf =
   Sql.Returning insert returningSEs
   where insert = arrangeInsertMany table columns
-        TI.View columnsR = TI.tablePropertiesView (TI.tableProperties table)
+        TI.View columnsR = TI.tableColumnsView (TI.tableColumns table)
         returningPEs = U.collectPEs unpackspec (returningf columnsR)
         returningSEs = Sql.ensureColumnsGen id (map Sql.sqlExpr returningPEs)
 
--- | For internal use only.  Do not use.  Will be deprecated in
--- version 0.6.
+{-# DEPRECATED arrangeInsertManyReturningSql
+    "You probably want 'runInsertManyReturning' instead. \
+    \Will be removed in version 0.7." #-}
 arrangeInsertManyReturningSql :: U.Unpackspec columnsReturned ignored
                               -> T.Table columnsW columnsR
                               -> NEL.NonEmpty columnsW
@@ -351,8 +340,9 @@ arrangeInsertManyReturningSql :: U.Unpackspec columnsReturned ignored
 arrangeInsertManyReturningSql =
   show . Print.ppInsertReturning .:: arrangeInsertManyReturning
 
--- | For internal use only.  Do not use.  Will be deprecated in
--- version 0.6.
+{-# DEPRECATED arrangeUpdateReturning
+    "You probably want 'runUpdateReturning' instead. \
+    \Will be removed in version 0.7." #-}
 arrangeUpdateReturning :: U.Unpackspec columnsReturned ignored
                        -> T.Table columnsW columnsR
                        -> (columnsR -> columnsW)
@@ -362,12 +352,13 @@ arrangeUpdateReturning :: U.Unpackspec columnsReturned ignored
 arrangeUpdateReturning unpackspec table updatef cond returningf =
   Sql.Returning update returningSEs
   where update = arrangeUpdate table updatef cond
-        TI.View columnsR = TI.tablePropertiesView (TI.tableProperties table)
+        TI.View columnsR = TI.tableColumnsView (TI.tableColumns table)
         returningPEs = U.collectPEs unpackspec (returningf columnsR)
         returningSEs = Sql.ensureColumnsGen id (map Sql.sqlExpr returningPEs)
 
--- | For internal use only.  Do not use.  Will be deprecated in
--- version 0.6.
+{-# DEPRECATED arrangeUpdateReturningSql
+    "You probably want 'runUpdateReturning' instead. \
+    \Will be removed in version 0.7." #-}
 arrangeUpdateReturningSql :: U.Unpackspec columnsReturned ignored
                           -> T.Table columnsW columnsR
                           -> (columnsR -> columnsW)

@@ -36,7 +36,7 @@ import qualified Data.String as String
 import           Data.UUID (UUID)
 import           GHC.Int (Int32, Int64)
 
--- { Only needed for annoying postgresql-simple patch below
+-- { Only needed for postgresql-simple FieldParsers
 
 import           Control.Applicative ((<$>))
 import           Database.PostgreSQL.Simple.FromField
@@ -52,6 +52,9 @@ import           Data.Typeable (Typeable)
 -- @haskellType@.  For example a value of type 'QueryRunnerColumn'
 -- 'T.PGText' 'String' encodes how to turn a 'T.PGText' result from the
 -- database into a Haskell 'String'.
+--
+-- \"'QueryRunnerColumn' @pgType@ @haskellType@\" corresponds to
+-- postgresql-simple's \"'FieldParser' @haskellType@\".
 
 -- This is *not* a Product Profunctor because it is the only way I
 -- know of to get the instance generation to work for non-Nullable and
@@ -71,6 +74,11 @@ instance Functor (QueryRunnerColumn u) where
 --   into Haskell values (@haskells@).  Most likely you will never need
 --   to create on of these or handle one directly.  It will be provided
 --   for you by the 'D.Default' 'QueryRunner' instance.
+--
+-- \"'QueryRunner' @columns@ @haskells@\" corresponds to
+-- postgresql-simple's \"'RowParser' @haskells@\".  \"'Default'
+-- 'QueryRunner' @columns@ @haskells@\" corresponds to
+-- postgresql-simple's \"@FromRow@ @haskells@\".
 data QueryRunner columns haskells =
   QueryRunner (U.Unpackspec columns ())
               (columns -> RowParser haskells)
@@ -127,6 +135,9 @@ instance QueryRunnerColumnDefault a b =>
 -- | A 'QueryRunnerColumnDefault' @pgType@ @haskellType@ represents
 -- the default way to turn a @pgType@ result from the database into a
 -- Haskell value of type @haskellType@.
+--
+-- \"'QueryRunnerColumnDefault' @pgType@ @haskellType@\" corresponds
+-- to postgresql-simple's \"'FromField' @haskellType@\".
 --
 -- Creating an instance of 'QueryRunnerColumnDefault' for your own types is
 -- necessary for retrieving those types from the database.
@@ -188,6 +199,9 @@ instance QueryRunnerColumnDefault T.PGTimestamptz Time.UTCTime where
   queryRunnerColumnDefault = fieldQueryRunnerColumn
 
 instance QueryRunnerColumnDefault T.PGTimestamp Time.LocalTime where
+  queryRunnerColumnDefault = fieldQueryRunnerColumn
+
+instance QueryRunnerColumnDefault T.PGTimestamptz Time.ZonedTime where
   queryRunnerColumnDefault = fieldQueryRunnerColumn
 
 instance QueryRunnerColumnDefault T.PGTime Time.TimeOfDay where
@@ -265,6 +279,10 @@ jsonbFieldParser = jsonFieldTypeParser (String.fromString "jsonb")
 
 -- typenames, not type Oids are used in order to avoid creating
 -- a dependency on 'Database.PostgreSQL.LibPQ'
+--
+-- Eventually we want to move this to postgresql-simple
+--
+--     https://github.com/tomjaguarpaw/haskell-opaleye/issues/329
 jsonFieldTypeParser :: SBS.ByteString -> FieldParser String
 jsonFieldTypeParser jsonTypeName field mData = do
     ti <- typeInfo field

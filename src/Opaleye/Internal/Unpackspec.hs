@@ -28,17 +28,16 @@ newtype Unpackspec columns columns' =
   -- the @makeAdaptorAndInstance@ splice from
   -- @Data.Profunctor.Product.TH@ has been run).
   --
-  -- You can create 'Unpackspec's by hand using 'unpackspecColumn' and
-  -- the 'Profunctor', 'ProductProfunctor' and 'SumProfunctor'
-  -- operations.  However, in practice users should almost never need
-  -- to create or manipulate them.  Typically they will be created
-  -- automatically by the 'D.Default' instance.
+  -- Users should almost never need to create or manipulate
+  -- `Unpackspec`s.  Typically they will be created automatically by
+  -- the 'D.Default' instance.  If you really need to you can create
+  -- 'Unpackspec's by hand using 'unpackspecColumn' and the
+  -- 'Profunctor', 'ProductProfunctor' and 'SumProfunctor' operations.
   Unpackspec (PM.PackMap HPQ.PrimExpr HPQ.PrimExpr columns columns')
 
 -- | Target the single 'HPQ.PrimExpr' inside a 'C.Column'
 unpackspecColumn :: Unpackspec (C.Column a) (C.Column a)
-unpackspecColumn = Unpackspec
-                   (PM.PackMap (\f (IC.Column pe) -> fmap IC.Column (f pe)))
+unpackspecColumn = Unpackspec (PM.iso IC.unColumn IC.Column)
 
 -- | Modify all the targeted 'HPQ.PrimExpr's
 runUnpackspec :: Applicative f

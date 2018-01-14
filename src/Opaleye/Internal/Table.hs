@@ -1,11 +1,13 @@
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE Rank2Types #-}
 
 module Opaleye.Internal.Table where
 
-import           Opaleye.Internal.Column (Column, unColumn)
-import qualified Opaleye.Internal.TableMaker as TM
+import           Opaleye.Internal.Column (Column(Column), unColumn)
 import qualified Opaleye.Internal.Tag as Tag
+import qualified Opaleye.Internal.Unpackspec as U
 import qualified Opaleye.Internal.PrimQuery as PQ
 import qualified Opaleye.Internal.PackMap as PM
 
@@ -38,33 +40,60 @@ import qualified Control.Arrow as Arr
 --                              (Column PGInt4) (Column PGFloat8))
 --                      (Widget (Column PGText) (Column PGText) (Column PGText)
 --                              (Column PGInt4) (Column PGFloat8))
--- widgetTable = Table \"widgetTable\"
---                      (pWidget Widget { wid      = optional \"id\"
---                                      , color    = required \"color\"
---                                      , location = required \"location\"
---                                      , quantity = required \"quantity\"
---                                      , radius   = required \"radius\" })
+-- widgetTable = table \"widgetTable\"
+--                      (pWidget Widget { wid      = tableColumn \"id\"
+--                                      , color    = tableColumn \"color\"
+--                                      , location = tableColumn \"location\"
+--                                      , quantity = tableColumn \"quantity\"
+--                                      , radius   = tableColumn \"radius\" })
 -- @
+--
+-- The constructors of Table are internal only and will be
+-- deprecated in version 0.7.
 data Table writerColumns viewColumns
-  = Table String (TableProperties writerColumns viewColumns)
-    -- ^ Uses the default schema name (@\"public\"@).
-  | TableWithSchema String String (TableProperties writerColumns viewColumns)
-    -- ^ Schema name (@\"public\"@ by default in PostgreSQL), table name,
-    --   table properties.
+  = Table String (TableColumns writerColumns viewColumns)
+    -- ^ For unqualified table names. Do not use the constructor.  It
+    -- is internal and will be deprecated in version 0.7.
+  | TableWithSchema String String (TableColumns writerColumns viewColumns)
+    -- ^ Schema name, table name, table properties.  Do not use the
+    -- constructor.  It is internal and will be deprecated in version 0.7.
 
-tableIdentifier :: Table writerColumns viewColumns -> PQ.TableIdentifier
+tableIdentifier :: Table writeColumns viewColumns -> PQ.TableIdentifier
 tableIdentifier (Table t _) = PQ.TableIdentifier Nothing t
 tableIdentifier (TableWithSchema s t _) = PQ.TableIdentifier (Just s) t
 
-tableProperties :: Table writerColumns viewColumns -> TableProperties writerColumns viewColumns
-tableProperties (Table _ p) = p
-tableProperties (TableWithSchema _ _ p) = p
+tableColumns :: Table writeColumns viewColumns -> TableColumns writeColumns viewColumns
+tableColumns (Table _ p) = p
+tableColumns (TableWithSchema _ _ p) = p
 
-data TableProperties writerColumns viewColumns = TableProperties
-   { tablePropertiesWriter :: Writer writerColumns viewColumns
+-- | Use 'tableColumns' instead.  Will be deprecated soon.
+tableProperties :: Table writeColumns viewColumns -> TableColumns writeColumns viewColumns
+tableProperties = tableColumns
+
+-- | Use 'TableColumns' instead. 'TableProperties' will be deprecated
+-- in version 0.7.
+data TableProperties writeColumns viewColumns = TableProperties
+   { tablePropertiesWriter :: Writer writeColumns viewColumns
    , tablePropertiesView   :: View viewColumns }
 
+-- | The new name for 'TableColumns' which will replace
+-- 'TableColumn' in version 0.7.
+type TableColumns = TableProperties
+
+tableColumnsWriter :: TableColumns writeColumns viewColumns
+                   -> Writer writeColumns viewColumns
+tableColumnsWriter = tablePropertiesWriter
+
+tableColumnsView :: TableColumns writeColumns viewColumns
+                 -> View viewColumns
+tableColumnsView = tablePropertiesView
+
+-- | Internal only.  Do not use.  'View' will be deprecated in version
+-- 0.7.
 data View columns = View columns
+
+-- | Internal only.  Do not use.  'Writer' will be deprecated in
+-- version 0.7.
 
 -- There's no reason the second parameter should exist except that we
 -- use ProductProfunctors more than ProductContravariants so it makes
@@ -79,21 +108,47 @@ newtype Writer columns dummy =
   Writer (forall f. Functor f =>
           PM.PackMap (f HPQ.PrimExpr, String) () (f columns) ())
 
-queryTable :: TM.ColumnMaker viewColumns columns
-            -> Table writerColumns viewColumns
+-- | 'required' is for columns which are not 'optional'.  You must
+-- provide them on writes.
+required :: String -> TableColumns (Column a) (Column a)
+required columnName = TableProperties
+  (requiredW columnName)
+  (View (Column (HPQ.BaseTableAttrExpr columnName)))
+
+-- | 'optional' is for columns that you can omit on writes, such as
+--  columns which have defaults or which are SERIAL.
+optional :: String -> TableColumns (Maybe (Column a)) (Column a)
+optional columnName = TableProperties
+  (optionalW columnName)
+  (View (Column (HPQ.BaseTableAttrExpr columnName)))
+
+class TableColumn a b | a -> b where
+    -- | Create either a 'required' or 'optional' column depending on
+    -- the write type.  It's generally more convenient to use this
+    -- than 'required' or 'optional'.
+    tableColumn :: String -> TableColumns a (Column b)
+
+instance TableColumn (Column a) a where
+    tableColumn = required
+
+instance TableColumn (Maybe (Column a)) a where
+    tableColumn = optional
+
+queryTable :: U.Unpackspec viewColumns columns
+            -> Table writeColumns viewColumns
             -> Tag.Tag
             -> (columns, PQ.PrimQuery)
 queryTable cm table tag = (primExprs, primQ) where
-  View tableCols = tablePropertiesView (tableProperties table)
+  View tableCols = tableColumnsView (tableColumns table)
   (primExprs, projcols) = runColumnMaker cm tag tableCols
   primQ :: PQ.PrimQuery
   primQ = PQ.BaseTable (tableIdentifier table) projcols
 
-runColumnMaker :: TM.ColumnMaker tablecolumns columns
+runColumnMaker :: U.Unpackspec tablecolumns columns
                   -> Tag.Tag
                   -> tablecolumns
                   -> (columns, [(HPQ.Symbol, HPQ.PrimExpr)])
-runColumnMaker cm tag tableCols = PM.run (TM.runColumnMaker cm f tableCols) where
+runColumnMaker cm tag tableCols = PM.run (U.runUnpackspec cm f tableCols) where
   f = PM.extractAttrPE mkName tag
   -- The non-AttrExpr PrimExprs are not created by 'makeView' or a
   -- 'ViewColumnMaker' so could only arise from an fmap (if we
@@ -127,15 +182,14 @@ instance Monoid (Zip a) where
     where mempty' = [] `NEL.cons` mempty'
   Zip xs `mappend` Zip ys = Zip (NEL.zipWith (++) xs ys)
 
-required :: String -> Writer (Column a) (Column a)
-required columnName =
-  Writer (PM.PackMap (\f columns -> f (fmap unColumn columns, columnName)))
+requiredW :: String -> Writer (Column a) (Column a)
+requiredW columnName =
+  Writer (PM.iso (flip (,) columnName . fmap unColumn) id)
 
-optional :: String -> Writer (Maybe (Column a)) (Column a)
-optional columnName =
-  Writer (PM.PackMap (\f columns -> f (fmap maybeUnColumn columns, columnName)))
-  where maybeUnColumn Nothing = HPQ.DefaultInsertExpr
-        maybeUnColumn (Just column) = unColumn column
+optionalW :: String -> Writer (Maybe (Column a)) (Column a)
+optionalW columnName =
+  Writer (PM.iso (flip (,) columnName . fmap maybeUnColumn) id)
+  where maybeUnColumn = maybe HPQ.DefaultInsertExpr unColumn
 
 -- {
 
@@ -173,5 +227,9 @@ instance ProductProfunctor TableProperties where
 instance Functor (Table a) where
   fmap f (Table t tp) = Table t (fmap f tp)
   fmap f (TableWithSchema s t tp) = TableWithSchema s t (fmap f tp)
+
+instance Profunctor Table where
+  dimap f g (Table t tp) = Table t (dimap f g tp)
+  dimap f g (TableWithSchema s t tp) = TableWithSchema s t (dimap f g tp)
 
 -- }

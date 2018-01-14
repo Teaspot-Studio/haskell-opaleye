@@ -9,7 +9,7 @@
 > import           Prelude hiding (sum)
 >
 > import           Opaleye (Column, Nullable, matchNullable, isNull,
->                          Table(Table), required, queryTable,
+>                          Table, table, tableColumn, queryTable,
 >                          Query, QueryArr, restrict, (.==), (.<=), (.&&), (.<),
 >                          (.===),
 >                          (.++), ifThenElse, pgString, aggregate, groupBy,
@@ -61,13 +61,13 @@ manipulation tutorial you can see an example of when they might differ.
 
 > personTable :: Table (Column PGText, Column PGInt4, Column PGText)
 >                      (Column PGText, Column PGInt4, Column PGText)
-> personTable = Table "personTable" (p3 ( required "name"
->                                       , required "age"
->                                       , required "address" ))
+> personTable = table "personTable" (p3 ( tableColumn "name"
+>                                       , tableColumn "age"
+>                                       , tableColumn "address" ))
 
 By default, the table `"personTable"` is looked up in PostgreSQL's
 default `"public"` schema. If we wanted to specify a different schema we
-could have used the `TableWithSchema` constructor instead of `Table`.
+could have used the `tableWithSchema` function instead of `table`.
 
 To query a table we use `queryTable`.
 
@@ -136,15 +136,15 @@ Template Haskell.
 
 You don't have to use Template Haskell, but it just saves us writing
 things out by hand here.  If you want to avoid Template Haskell see
-[Data.Profunctor.Product.TH](https://hackage.haskell.org/package/product-profunctors-0.6.3.1/docs/Data-Profunctor-Product-TH.html).
+[Data.Profunctor.Product.TH](https://hackage.haskell.org/package/product-profunctors/docs/Data-Profunctor-Product-TH.html).
 
-Then we can use 'Table' to make a table on our record type in exactly
+Then we can use 'table' to make a table on our record type in exactly
 the same way as before.
 
 > birthdayTable :: Table BirthdayColumn BirthdayColumn
-> birthdayTable = Table "birthdayTable"
->                        (pBirthday Birthday { bdName = required "name"
->                                            , bdDay  = required "birthday" })
+> birthdayTable = table "birthdayTable"
+>                        (pBirthday Birthday { bdName = tableColumn "name"
+>                                            , bdDay  = tableColumn "birthday" })
 >
 > birthdayQuery :: Query BirthdayColumn
 > birthdayQuery = queryTable birthdayTable
@@ -382,8 +382,8 @@ recorded as NULL then that means they have no boss!
 
 > employeeTable :: Table (Column PGText, Column (Nullable PGText))
 >                        (Column PGText, Column (Nullable PGText))
-> employeeTable = Table "employeeTable" (p2 ( required "name"
->                                           , required "boss" ))
+> employeeTable = table "employeeTable" (p2 ( tableColumn "name"
+>                                           , tableColumn "boss" ))
 
 We can write a query that returns as string indicating for each
 employee whether they have a boss.
@@ -584,12 +584,12 @@ strings, but in practice they might have been a different data type.
 >                              (Column PGInt4) (Column PGFloat8))
 >                      (Widget (Column PGText) (Column PGText) (Column PGText)
 >                              (Column PGInt4) (Column PGFloat8))
-> widgetTable = Table "widgetTable"
->                      (pWidget Widget { style    = required "style"
->                                      , color    = required "color"
->                                      , location = required "location"
->                                      , quantity = required "quantity"
->                                      , radius   = required "radius" })
+> widgetTable = table "widgetTable"
+>                      (pWidget Widget { style    = tableColumn "style"
+>                                      , color    = tableColumn "color"
+>                                      , location = tableColumn "location"
+>                                      , quantity = tableColumn "quantity"
+>                                      , radius   = tableColumn "radius" })
 
 
 Say we want to group by the style and color of widgets, calculating
@@ -752,10 +752,10 @@ We could represent the integer ID in Opaleye as a `PGInt4`
 >                                      (Column PGInt4)
 >
 > badWarehouseTable :: Table BadWarehouseColumn BadWarehouseColumn
-> badWarehouseTable = Table "warehouse_table"
->         (pWarehouse Warehouse { wId       = required "id"
->                               , wLocation = required "location"
->                               , wNumGoods = required "num_goods" })
+> badWarehouseTable = table "warehouse_table"
+>         (pWarehouse Warehouse { wId       = tableColumn "id"
+>                               , wLocation = tableColumn "location"
+>                               , wNumGoods = tableColumn "num_goods" })
 
 but that would expose us to the following sorts of errors, where we
 can meaninglessly relate the warehouse ID with the quantity of goods
@@ -776,10 +776,10 @@ On the other hand we can make a newtype for the warehouse ID
 >                                       (Column PGInt4)
 >
 > goodWarehouseTable :: Table GoodWarehouseColumn GoodWarehouseColumn
-> goodWarehouseTable = Table "warehouse_table"
->         (pWarehouse Warehouse { wId       = pWarehouseId (WarehouseId (required "id"))
->                               , wLocation = required "location"
->                               , wNumGoods = required "num_goods" })
+> goodWarehouseTable = table "warehouse_table"
+>         (pWarehouse Warehouse { wId       = pWarehouseId (WarehouseId (tableColumn "id"))
+>                               , wLocation = tableColumn "location"
+>                               , wNumGoods = tableColumn "num_goods" })
 
 Now the comparison will not pass the type checker
 

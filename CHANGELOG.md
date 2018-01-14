@@ -1,3 +1,41 @@
+## 0.6.0.0
+
+* Added `runUpdateEasy`
+
+* Deprecated
+
+  * `Show` instance of `Column a`
+  * `Manipulation.arrange...`
+  * `showPGType`
+  * `literalColumn`
+  * `unsafePgFormatTime`
+  * `prepareQuery`
+  * `formatAndShowSQL`
+
+* Removed
+
+  * `unsafeCoerce`
+
+* Added `TableColumn` and `tableColumn` which selects `optional` or
+  `required` based on write type.
+
+* Added `TableColumns` as synonym for `TableProperties`.
+  `TableProperties` will be deprecated in version 0.7.
+
+* Added `table` as synonym for `Table`.  `Table` will be deprecated in
+  version 0.7.
+
+* Added `tableWithSchema` as synonym for `TableWithSchema`.  `Table`
+  will be deprecated in version 0.7.
+
+* Replaced `ColumnMaker` with `Unpackspec`, which is identical to it.
+
+* Added `Profunctor` instance for `Table`
+
+* Added `restrictExists` and `restrictNotExists` as synonyms for
+  `exists` and `notExists`.  The latter will be deprecated in version
+  0.7.
+
 ## 0.5.4.0
 
 * Added cursor interface (`Cursor` and friends)
